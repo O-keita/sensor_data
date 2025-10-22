@@ -1,157 +1,253 @@
-# Sensor Data Extraction & Combining — Full Pipeline Guide
+# Quick Start — Exact Commands & Steps
 
-This README explains the end-to-end workflow to extract Accelerometer/Gyroscope CSVs from zip archives and produce combined per-activity CSVs merged by timestamp. It covers repository layout and folder naming, virtualenv and dependencies, the full extract→combine pipeline, and troubleshooting notes.
+This README gives the exact, minimal sequence of commands and the specific script filenames to run for the full pipeline:
+- extract sensor CSVs (Accelerometer, Gyroscope) from zip files, and
+- combine sessions into per-activity combined CSVs.
 
-Goal: Given a tree of activity folders where each activity has a `raw/` folder with zip files, extract only the sensor CSVs (Accelerometer, Gyroscope) and merge session pairs into per-activity combined CSVs with columns:
+Assumes you already have the project scripts in the repository root:
+- extract_all_zips.py
+- extract_from_zip.py
+- combine_activity_sessions.py
+- combine_accel_gyro.py
+- (optional) combine_csv.py / combine_csv_folder.py
 
-- timestamp
-- accel_x
-- accel_y
-- accel_z
-- gyro_x
-- gyro_y
-- gyro_z
-
----
-
-## Requirements
-
-- Python 3.8+ (3.10+ recommended)
-- pandas
-
-We recommend using a virtual environment. Typical steps:
-- create and activate a venv (e.g., `python3 -m venv venv` and `source venv/bin/activate`)
-- install pandas in the virtual environment
+I’ll walk you through the step-by-step commands to run, where to put your zip files, and what to expect.
 
 ---
 
-## Expected folder naming / layout
+## 0 — Prepare environment (one-time)
 
-Set up activity folders under a `data/` root. Example structure:
+Create and activate a Python virtual environment and install pandas.
 
+Linux / macOS:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install pandas
+```
+
+Windows (PowerShell):
+```powershell
+python -m venv venv
+venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install pandas
+```
+
+Confirm Python and pandas:
+```bash
+python -V
+python -c "import pandas as pd; print(pd.__version__)"
+```
+
+---
+
+## 1 — Arrange your zip files (folder naming convention)
+
+Create an activity folder for each activity and place the zip files in a `raw/` subfolder.
+
+Example structure (you can create these with mkdir and copy your zips in):
+
+```
 data/
-- walking/
-  - raw/                (put all .zip files for walking here)
-- jumping/
-  - raw/
-- still/
-  - raw/
-
-After extraction you will get:
-
-data/
-- walking/
-  - raw/
-    - 2025-10-22_11-11-09.zip
-    - ...
-  - extracted/
-    - 2025-10-22_11-11-09/
-      - Accelerometer.csv
-      - Gyroscope.csv
-    - ...
-- jumping/
-  - extracted/
-    - ...
-
-Combined outputs will be written to an output directory (default `data/combined/`), for example:
-- `omar_walking_combined.csv`
-- `omar_jumping_combined.csv`
+  walking/
+    raw/
+      2025-10-22_11-11-09.zip
+      2025-10-22_11-11-25.zip
+      ...
+  jumping/
+    raw/
+      ...
+  still/
+    raw/
+      ...
+```
 
 Notes:
-- Filenames inside zips can be `Accelerometer.csv`, `accelerometer.csv`, etc. Matching is case-insensitive and looks for basenames `accelerometer.csv` and `gyroscope.csv`.
-- Session folders are created per-zip using the zip basename (e.g., `2025-10-22_11-11-09.zip` → extracted folder `2025-10-22_11-11-09/`).
+- The extractor looks for `.zip` files inside each activity's `raw/` folder.
+- Ensure `data/<activity>/raw` exists and contains the zips before extraction.
 
 ---
 
-## Scripts overview
+## 2 — Extract sensor CSVs from ALL zips for one activity
 
-The repository contains several small CLI scripts:
+Use `extract_all_zips.py`. This script will:
+- scan the given `--source` directory for `.zip` files,
+- for each zip, create a directory under the destination base and extract only sensor files named (case-insensitive) `accelerometer.csv` and `gyroscope.csv`.
 
-- `extract_all_zips.py` — scan a folder containing `.zip` files and extract only `accelerometer.csv` and `gyroscope.csv` into per-zip folders under a destination base.
-- `extract_from_zip.py` — extract or copy sensors from a single zip or a single folder (useful for one-off operations).
-- `combine_activity_sessions.py` — locate session folders under `activity/extracted/`, merge accelerometer + gyroscope by timestamp across sessions, and write per-activity combined CSVs. Supports optional `--name` to prepend a sanitized name to the output filenames (e.g., `omar_walking_combined.csv`).
-- `combine_accel_gyro.py` — helper to merge a single session folder (useful for testing).
-- `combine_csv.py` / `combine_csv_folder.py` — generic CSV concatenation helpers.
+Example (non-interactive; recommended):
 
----
+```bash
+# Example for "walking" activity
+python extract_all_zips.py --source data/walking/raw --dest data/walking/extracted --verbose
+```
 
-## Full pipeline (step-by-step)
+What this does:
+- For each zip `.../<zipname>.zip` found under `data/walking/raw`, creates `data/walking/extracted/<zipname>/`
+- Extracts `Accelerometer.csv` and `Gyroscope.csv` (if present) into that per-zip folder.
+- Prints progress if `--verbose` is used.
 
-1. Prepare activity folders and place zips under each activity's `raw/` folder.
-   - Example: create `data/walking/raw` and copy walking zips there.
+Interactive mode (prompts):
+```bash
+python extract_all_zips.py
+# then when prompted:
+# Source folder containing .zip files (e.g. data/walking): data/walking/raw
+# Destination base folder where extracted folders will be created (e.g. data/walking/extracted): data/walking/extracted
+```
 
-2. Extract zips for an activity:
-   - Run `extract_all_zips.py` and provide the source folder (the folder that contains `.zip` files, e.g. `data/walking/raw`) and the destination base (e.g. `data/walking/extracted`).
-   - The script creates per-zip subfolders under the destination base and extracts `Accelerometer.csv` and `Gyroscope.csv` from each zip.
+If you only need to extract a single zip or copy from an already-extracted folder, use:
+```bash
+# Extract single zip into a destination folder
+python extract_from_zip.py /path/to/one.zip data/walking/extracted
 
-   Alternatively, for a single zip or already-extracted folder, use `extract_from_zip.py` to extract or copy the two sensor files into a chosen destination.
-
-3. Combine sessions into per-activity CSVs:
-   - Run `combine_activity_sessions.py` and provide:
-     - source root (the folder containing activity subfolders, e.g. `data`)
-     - extracted subdir name (default `extracted`)
-     - output base (default `data/combined`)
-     - optional `--name` to prepend a sanitized name (e.g., `Omar`) to output filenames
-     - optional `--add-session` to include a `session` column in aggregated outputs
-   - The script finds each session folder under `<activity>/extracted/`, merges each session's `Accelerometer.csv` and `Gyroscope.csv` on timestamp (inner join), concatenates session merges for each activity, and writes one combined CSV per activity.
-
-4. Verify outputs
-   - Check the files created under the output directory (default `data/combined`), and inspect a few rows to confirm column ordering and content.
-
----
-
-## Examples (high level)
-
-- Extract all zips for activity `walking` by pointing `extract_all_zips.py` at `data/walking/raw` and choosing `data/walking/extracted` as the destination base.
-- Combine sessions across activities by running `combine_activity_sessions.py` with the appropriate `--source-root` and `--extracted-subdir`, and use `--name` to prepend a username to output filenames.
-
-(Commands are run from the project root with a Python virtual environment activated.)
+# Copy from an already-extracted session folder into destination
+python extract_from_zip.py data/walking/some_session_folder data/walking/extracted
+```
 
 ---
 
-## Notes on merging and matching timestamps
+## 3 — Confirm extraction (quick checks)
 
-- The scripts detect the timestamp column heuristically by looking for column names containing `time`, `timestamp`, `seconds`, `elapsed`, etc. If no such name is found, the first column is used as a fallback.
-- Merging is an inner join on exact timestamp equality. If accelerometer and gyroscope timestamps are slightly different (no exact equality), the join drops non-matching rows. If sensors are not synchronized, consider requesting a nearest-neighbor merge option that matches rows within a tolerance.
-- Axis detection handles common naming patterns (`x`, `X`, `accel_x`, `z`, etc.) but if your headers differ significantly you may need to rename them or update the scripts.
+List the extracted folders and check files:
 
----
+```bash
+# show the per-session folders created
+ls -1 data/walking/extracted
 
-## Filename sanitization & outputs
+# inspect one session folder
+ls -l data/walking/extracted/2025-10-22_11-11-09
+# should list Accelerometer.csv and Gyroscope.csv
+```
 
-- The `--name` passed to `combine_activity_sessions.py` is sanitized (lowercased and non-alphanumeric characters replaced) and prepended to output filenames. Example: `--name Omar` → `omar_walking_combined.csv`.
-- Output columns order:
-  - `timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z`
-- Combined files are written to the directory specified by `--out` (default `data/combined`).
-
----
-
-## Troubleshooting
-
-- "No zip files found" — ensure the `--source` path points to a folder containing `.zip` files (e.g. `data/walking/raw`).
-- "No sensor CSVs in '<zip>'" — check zip contents; the extractor looks for basenames `accelerometer.csv` and `gyroscope.csv` (case-insensitive).
-- "Missing accel or gyro" during combine — ensure each session folder contains both `Accelerometer.csv` and `Gyroscope.csv`.
-- "No merged rows" — timestamps don't match exactly. Consider requesting nearest-neighbor merging within a tolerance.
-- Memory: scripts load CSVs into pandas DataFrames. For very large files, consider chunked or streaming processing.
+Open the first few lines to ensure headers are present:
+```bash
+head -n 5 data/walking/extracted/2025-10-22_11-11-09/Accelerometer.csv
+head -n 5 data/walking/extracted/2025-10-22_11-11-09/Gyroscope.csv
+```
 
 ---
 
-## Next steps / Extensions
+## 4 — Combine sessions into per-activity CSVs
 
-Possible improvements:
-- Add nearest-neighbor timestamp matching with a user-specified tolerance.
-- Produce per-session combined CSVs in addition to per-activity aggregates.
-- Add tests and a small example dataset.
-- Make the pipeline more memory-efficient for very large CSV files.
+Run `combine_activity_sessions.py` to find session subfolders under each activity's `extracted/` and merge accelerometer + gyroscope by timestamp.
+
+Non-interactive example (recommended):
+
+```bash
+python combine_activity_sessions.py \
+  --source-root data \
+  --extracted-subdir extracted \
+  --out data/combined \
+  --name Omar \
+  --add-session \
+  --verbose
+```
+
+Meaning of flags:
+- `--source-root data` — root folder that contains activity folders (walking, jumping, etc.)
+- `--extracted-subdir extracted` — subfolder name under each activity containing session folders
+- `--out data/combined` — where combined per-activity CSVs will be written
+- `--name Omar` — optional; sanitized and prepended to output filenames (`omar_walking_combined.csv`)
+- `--add-session` — include a `session` column in aggregated outputs identifying which session folder each row came from
+- `--verbose` — prints extra info while processing
+
+Interactive prompts (if you omit args):
+```bash
+python combine_activity_sessions.py
+# then follow prompts:
+# Source root (folder that contains activity subfolders) [default: data]: data
+# Name (optional): Omar
+# Name of extracted subfolder under each activity [default: extracted]: extracted
+# Output base folder for combined CSVs [default: data/combined]: data/combined
+```
+
+What to expect:
+- For each activity (e.g., `walking`) the script concatenates merged rows from all sessions and writes:
+  - `data/combined/omar_walking_combined.csv` (if `--name Omar` provided)
+  - or `data/combined/walking_combined.csv` (if no name provided)
+- Output columns (ordered): `timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z`
+- If `--add-session` is used, the `session` column appears first.
 
 ---
 
-## Contact / usage tip
+## 5 — Verify combined outputs
 
-- Activate the virtual environment before running scripts: use your project's `venv` activation command (for example, `source venv/bin/activate` on Linux/macOS).
-- Run the extractor first to create the `extracted/` session folders, then run the combine script to produce per-activity combined files.
+List and inspect:
 
-If you want, I can now:
-- update the combine script to perform nearest-neighbor timestamp matching,
-- add per-session outputs,
-- or produce a minimal example run using one activity from your tree. Tell me which and I'll implement it.
+```bash
+ls -l data/combined
+head -n 5 data/combined/omar_walking_combined.csv
+```
+
+Check counts:
+```bash
+wc -l data/combined/omar_walking_combined.csv
+# or open in pandas for further checks
+python - <<'PY'
+import pandas as pd
+df=pd.read_csv("data/combined/omar_walking_combined.csv")
+print(df.columns)
+print(df.head())
+PY
+```
+
+---
+
+## Optional / Helpful commands
+
+- Combine a single session folder (test) using `combine_accel_gyro.py`:
+```bash
+python combine_accel_gyro.py --source data/walking/extracted/2025-10-22_11-11-09 --out data/combined --verbose
+```
+
+- Combine raw CSV files in a single folder (generic concatenation):
+```bash
+python combine_csv_folder.py data/some_folder_with_csvs -o data/combined/merged.csv --add-source
+```
+
+- Re-run extraction with `--overwrite` to replace files:
+```bash
+python extract_all_zips.py --source data/walking/raw --dest data/walking/extracted --overwrite
+```
+
+---
+
+## Important behaviors & troubleshooting reminders
+
+- Extraction looks for basenames exactly matching `accelerometer.csv` and `gyroscope.csv` (case-insensitive). If your sensor files use different names, rename them or adjust the extractor.
+- Combining merges on exact timestamp equality (inner join). If accel and gyro timestamps are not exactly aligned, the merge may drop rows. If you need fuzzy/nearest matching, ask to add a tolerance-based matching option.
+- Activate the venv before running scripts so pandas from your env is used: `source venv/bin/activate`.
+- If a session is missing either Accelerometer or Gyroscope, it will be skipped during combine (the script prints warnings in `--verbose` mode).
+- For very large CSVs, the scripts load files into pandas and may use a lot of memory—if that is an issue, we can add streaming or chunked processing.
+
+---
+
+## Quick example: single actionable run
+
+1. Activate venv:
+```bash
+source venv/bin/activate
+```
+
+2. Extract all walking zips:
+```bash
+python extract_all_zips.py --source data/walking/raw --dest data/walking/extracted --verbose
+```
+
+3. Combine all activities into per-activity CSVs with your name:
+```bash
+python combine_activity_sessions.py --source-root data --extracted-subdir extracted --out data/combined --name Omar --add-session --verbose
+```
+
+4. Inspect output:
+```bash
+ls -l data/combined
+head -n 5 data/combined/omar_walking_combined.csv
+```
+
+---
+
+If you'd like, I can:
+- add a short block with the exact results you should expect for one session (sample `head` output), or
+- add a `--tolerance` nearest-neighbor merge option to handle unsynchronized timestamps — tell me which and I will update the combine script and the README accordingly.
